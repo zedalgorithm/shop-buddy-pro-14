@@ -1,51 +1,96 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowUpRight, ArrowDownRight, Package, AlertTriangle, DollarSign, TrendingUp } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-const salesData = [
-  { name: "Mon", sales: 4200 },
-  { name: "Tue", sales: 3800 },
-  { name: "Wed", sales: 5200 },
-  { name: "Thu", sales: 4600 },
-  { name: "Fri", sales: 6800 },
-  { name: "Sat", sales: 7200 },
-  { name: "Sun", sales: 5400 },
-];
-
-const topProducts = [
-  { name: "Classic Burger", sold: 145, revenue: 2175 },
-  { name: "Chicken Wrap", sold: 128, revenue: 1920 },
-  { name: "Caesar Salad", sold: 98, revenue: 1470 },
-  { name: "Fish & Chips", sold: 87, revenue: 1305 },
-];
-
-const lowStockItems = [
-  { name: "Tomatoes", current: 12, minimum: 20, unit: "kg" },
-  { name: "Burger Buns", current: 25, minimum: 50, unit: "pcs" },
-  { name: "Lettuce", current: 8, minimum: 15, unit: "kg" },
-];
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function Dashboard() {
+  // Live stats
+  const [revenue, setRevenue] = useState(0);
+  const [transactionCount, setTransactionCount] = useState(0);
+  const [avgTransaction, setAvgTransaction] = useState(0);
+  const [stockTotal, setStockTotal] = useState(0);
+  const [lowStockItems, setLowStockItems] = useState<any[]>([]);
+  const [salesData, setSalesData] = useState<any[]>([]);
+  const [topProducts, setTopProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      setLoading(true);
+      // Transactions
+      const { data: txns } = await supabase
+        .from('transactions')
+        .select('id, created_at, total_amount')
+        .order('created_at');
+      const { data: items } = await supabase
+        .from('transaction_items')
+        .select('product_name, quantity, total_price, transaction_id');
+      // Fetch inventory data same way as Inventory page
+      const { data: prods } = await supabase
+        .from('products')
+        .select('id, name, stock_quantity, low_stock_threshold, updated_at, categories(name)')
+        .order('name');
+      // Revenue, count, avg
+      const txRevenue = txns?.reduce((sum, t) => sum + Number(t.total_amount||0), 0) || 0;
+      setRevenue(txRevenue);
+      setTransactionCount(txns?.length || 0);
+      setAvgTransaction(txns && txns.length ? txRevenue / txns.length : 0);
+      // Stock total - count of products with stock > 0 (same as Inventory page logic)
+      setStockTotal((prods||[]).filter(p => Number(p.stock_quantity||0) > 0).length);
+      // Low stock - same filter logic as Inventory page
+      const lowStock = (prods||[]).filter(p => {
+        const currentStock = Number(p.stock_quantity) || 0;
+        const minStock = Number(p.low_stock_threshold) || 10;
+        return currentStock < minStock;
+      });
+      setLowStockItems(lowStock.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        stock_quantity: Number(p.stock_quantity) || 0,
+        low_stock_threshold: Number(p.low_stock_threshold) || 10,
+        unit: 'units',
+        category: (p.categories as any)?.name || 'Uncategorized',
+      })));
+      // Sales by week or day
+      const weekData: Record<string, { name: string; sales: number }> = {};
+      for (const t of txns || []) {
+        const d = new Date(t.created_at);
+        // Use week string or day for tight hist
+        const weekKey = `${d.getFullYear()}-W${Math.ceil((d.getDate()-(d.getDay()||7-1))/7)}`;
+        if (!weekData[weekKey]) weekData[weekKey] = { name: weekKey, sales: 0 };
+        weekData[weekKey].sales += Number(t.total_amount||0);
+      }
+      setSalesData(Object.values(weekData));
+      // Top products (by sold quantity, last N periods)
+      const productSold: Record<string, { name: string, sold: number, revenue: number }> = {};
+      for (const row of items || []) {
+        if (!productSold[row.product_name]) productSold[row.product_name] = { name: row.product_name, sold: 0, revenue: 0 };
+        productSold[row.product_name].sold += Number(row.quantity||0);
+        productSold[row.product_name].revenue += Number(row.total_price||0);
+      }
+      setTopProducts(Object.values(productSold).sort((a,b)=>b.sold-a.sold).slice(0, 8));
+      setLoading(false);
+    };
+    fetchStats();
+  }, []);
+
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Overview of your business performance</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-sm sm:text-base text-muted-foreground mt-1">Overview of your business performance</p>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
         <Card className="border-border shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
             <DollarSign className="w-5 h-5 text-success" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">$12,456</div>
-            <p className="text-sm text-success flex items-center gap-1 mt-1">
-              <ArrowUpRight className="w-4 h-4" />
-              <span>+12.5% from last week</span>
-            </p>
+            <div className="text-2xl sm:text-3xl font-bold text-foreground">₱{revenue.toLocaleString()}</div>
           </CardContent>
         </Card>
 
@@ -55,11 +100,7 @@ export default function Dashboard() {
             <TrendingUp className="w-5 h-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">458</div>
-            <p className="text-sm text-success flex items-center gap-1 mt-1">
-              <ArrowUpRight className="w-4 h-4" />
-              <span>+8.2% from last week</span>
-            </p>
+            <div className="text-2xl sm:text-3xl font-bold text-foreground">{transactionCount}</div>
           </CardContent>
         </Card>
 
@@ -69,10 +110,10 @@ export default function Dashboard() {
             <Package className="w-5 h-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">342</div>
+            <div className="text-2xl sm:text-3xl font-bold text-foreground">{stockTotal}</div>
             <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
               <ArrowDownRight className="w-4 h-4 text-warning" />
-              <span>3 items low stock</span>
+              <span>{lowStockItems.length} items low stock</span>
             </p>
           </CardContent>
         </Card>
@@ -83,16 +124,12 @@ export default function Dashboard() {
             <DollarSign className="w-5 h-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">$27.19</div>
-            <p className="text-sm text-success flex items-center gap-1 mt-1">
-              <ArrowUpRight className="w-4 h-4" />
-              <span>+3.1% from last week</span>
-            </p>
+            <div className="text-2xl sm:text-3xl font-bold text-foreground">₱{isNaN(avgTransaction) ? '0' : avgTransaction.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Sales Chart */}
         <Card className="border-border shadow-sm">
           <CardHeader>
@@ -152,21 +189,27 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {lowStockItems.map((item) => (
-              <div key={item.name} className="flex items-center justify-between p-4 bg-secondary rounded-lg">
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">{item.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Current: {item.current} {item.unit} | Minimum: {item.minimum} {item.unit}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-medium text-warning">
-                    {Math.round((item.current / item.minimum) * 100)}% of minimum
+            {lowStockItems.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No low stock items. All products are well stocked!</p>
+              </div>
+            ) : (
+              lowStockItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-4 bg-secondary rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-foreground">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Current: {item.stock_quantity || 0} {item.unit || 'units'} | Minimum: {item.low_stock_threshold || 10} {item.unit || 'units'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium text-warning">
+                      {item.stock_quantity && item.low_stock_threshold ? Math.round((Number(item.stock_quantity) / (Number(item.low_stock_threshold)||1)) * 100) : 0}% of minimum
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

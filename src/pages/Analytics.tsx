@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TrendingUp, TrendingDown, DollarSign, ShoppingCart } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import {
   LineChart,
   Line,
@@ -16,35 +17,90 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-
-const revenueData = [
-  { month: "Jan", revenue: 45000, expenses: 32000, profit: 13000 },
-  { month: "Feb", revenue: 52000, expenses: 35000, profit: 17000 },
-  { month: "Mar", revenue: 48000, expenses: 33000, profit: 15000 },
-  { month: "Apr", revenue: 61000, expenses: 38000, profit: 23000 },
-  { month: "May", revenue: 55000, expenses: 36000, profit: 19000 },
-  { month: "Jun", revenue: 67000, expenses: 40000, profit: 27000 },
-];
-
-const categoryData = [
-  { name: "Main Dishes", value: 45, color: "hsl(var(--primary))" },
-  { name: "Beverages", value: 20, color: "hsl(var(--success))" },
-  { name: "Sides", value: 18, color: "hsl(var(--warning))" },
-  { name: "Desserts", value: 17, color: "hsl(var(--accent))" },
-];
-
-const cashflowData = [
-  { date: "Week 1", income: 15200, expenses: 9800 },
-  { date: "Week 2", income: 18400, expenses: 11200 },
-  { date: "Week 3", income: 16800, expenses: 10500 },
-  { date: "Week 4", income: 20100, expenses: 12300 },
-];
+import { useState, useEffect } from "react";
 
 export default function Analytics() {
+  // State for analytics
+  const [loading, setLoading] = useState(true);
+  const [revenue, setRevenue] = useState(0);
+  const [expenses, setExpenses] = useState(0);
+  const [profit, setProfit] = useState(0);
+  const [revenueData, setRevenueData] = useState<any[]>([]); // monthly chart
+  const [categoryData, setCategoryData] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      setLoading(true);
+      // Load all transactions and items
+      const { data: txns } = await supabase
+        .from('transactions')
+        .select('id, created_at, total_amount')
+        .order('created_at');
+      const { data: items } = await supabase
+        .from('transaction_items')
+        .select('transaction_id, product_id, unit_price, total_price, cost, quantity, product_name');
+      const { data: prods } = await supabase
+        .from('products')
+        .select('id, category_id');
+      const { data: cats } = await supabase
+        .from('categories')
+        .select('id, name');
+      // Compute totals
+      let sumRevenue = 0;
+      let sumExpenses = 0;
+      let monthly: Record<string, { revenue: number; expenses: number; profit: number }> = {};
+      // Build product:category lookup
+      const prodCat: Record<string, string> = {};
+      for (const p of prods || []) prodCat[p.id] = p.category_id;
+      // Build category color
+      const colorMap: Record<string, string> = {};
+      const catNames: Record<string, string> = {};
+      cats?.forEach((c, i) => {
+        colorMap[c.id] = `hsl(var(--primary))`;
+        catNames[c.id] = c.name;
+      });
+      // By-category sales aggregate
+      const catCounts: Record<string, { name: string, value: number }> = {};
+      // By-month data aggregate
+      txns?.forEach(t => {
+        sumRevenue += Number(t.total_amount || 0);
+        const ym = t.created_at ? (new Date(t.created_at).toISOString().slice(0, 7)) : 'Unknown';
+        if (!monthly[ym]) monthly[ym] = { revenue: 0, expenses: 0, profit: 0 };
+        monthly[ym].revenue += Number(t.total_amount || 0);
+      });
+      for (const row of items || []) {
+        const cost = Number(row.cost || 0) * Number(row.quantity || 1);
+        const catId = prodCat[row.product_id];
+        sumExpenses += cost;
+        // category pies
+        if (catId) {
+          const label = catNames[catId] || `Cat ${catId}`;
+          if (!catCounts[catId]) catCounts[catId] = { name: label, value: 0 };
+          catCounts[catId].value += Number(row.total_price || 0);
+        }
+        // monthlies expenses
+        const txn = txns?.find(t => t.id === row.transaction_id);
+        const ym = txn?.created_at ? (new Date(txn.created_at).toISOString().slice(0, 7)) : 'Unknown';
+        if (!monthly[ym]) monthly[ym] = { revenue: 0, expenses: 0, profit: 0 };
+        monthly[ym].expenses += cost;
+      }
+      // Compute profits
+      Object.values(monthly).forEach(m => { m.profit = m.revenue - m.expenses; });
+      setRevenue(sumRevenue);
+      setExpenses(sumExpenses);
+      setProfit(sumRevenue - sumExpenses);
+      // Chart data
+      setRevenueData(Object.entries(monthly).map(([key, v]) => ({ month: key, ...v })));
+      setCategoryData(Object.values(catCounts).map((cat, i) => ({ ...cat, color: `hsl(var(--primary) / ${(0.15 + 0.7*i/(Object.keys(catCounts).length||1)).toFixed(2)})` })));
+      setLoading(false);
+    };
+    fetchAnalytics();
+  }, []);
+
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-foreground">Analytics & Insights</h1>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="mb-4 sm:mb-6">
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Analytics & Insights</h1>
         <p className="text-muted-foreground mt-1">Track your business performance and cashflow</p>
       </div>
 
@@ -64,10 +120,10 @@ export default function Analytics() {
                 <DollarSign className="w-5 h-5 text-success" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-foreground">$328,000</div>
+                <div className="text-3xl font-bold text-foreground">₱{revenue.toLocaleString()}</div>
                 <p className="text-sm text-success flex items-center gap-1 mt-1">
                   <TrendingUp className="w-4 h-4" />
-                  <span>+18.2% from last period</span>
+                  <span>&nbsp;</span>
                 </p>
               </CardContent>
             </Card>
@@ -78,8 +134,8 @@ export default function Analytics() {
                 <TrendingDown className="w-5 h-5 text-destructive" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-foreground">$214,000</div>
-                <p className="text-sm text-muted-foreground mt-1">65% of revenue</p>
+                <div className="text-3xl font-bold text-foreground">₱{expenses.toLocaleString()}</div>
+                <p className="text-sm text-muted-foreground mt-1">{revenue ? `${Math.round((expenses/(revenue||1))*100)}% of revenue` : '-'}</p>
               </CardContent>
             </Card>
 
@@ -89,10 +145,10 @@ export default function Analytics() {
                 <TrendingUp className="w-5 h-5 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-success">$114,000</div>
+                <div className="text-3xl font-bold text-success">₱{profit.toLocaleString()}</div>
                 <p className="text-sm text-success flex items-center gap-1 mt-1">
                   <TrendingUp className="w-4 h-4" />
-                  <span>+24.5% from last period</span>
+                  <span>&nbsp;</span>
                 </p>
               </CardContent>
             </Card>
@@ -147,13 +203,13 @@ export default function Analytics() {
         <TabsContent value="cashflow" className="space-y-6">
           <Card className="border-border shadow-sm">
             <CardHeader>
-              <CardTitle className="text-foreground">Weekly Cashflow</CardTitle>
+              <CardTitle className="text-foreground">Monthly Cashflow</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={cashflowData}>
+                <BarChart data={revenueData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
+                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" />
                   <YAxis stroke="hsl(var(--muted-foreground))" />
                   <Tooltip
                     contentStyle={{
@@ -163,7 +219,7 @@ export default function Analytics() {
                     }}
                   />
                   <Legend />
-                  <Bar dataKey="income" fill="hsl(var(--success))" name="Income" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="revenue" fill="hsl(var(--success))" name="Income" radius={[8, 8, 0, 0]} />
                   <Bar dataKey="expenses" fill="hsl(var(--destructive))" name="Expenses" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -185,13 +241,13 @@ export default function Analytics() {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={({ name, value }) => `${name}: ${value}%`}
+                      label={({ name, value }) => `${name}: ₱${value.toLocaleString()}`}
                       outerRadius={120}
                       fill="#8884d8"
                       dataKey="value"
                     >
                       {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
+                        <Cell key={`cell-${index}`} fill={entry.color || `hsl(var(--primary))`} />
                       ))}
                     </Pie>
                     <Tooltip />
@@ -209,14 +265,14 @@ export default function Analytics() {
                   <div key={category.name} className="space-y-2">
                     <div className="flex justify-between">
                       <span className="text-sm font-medium text-foreground">{category.name}</span>
-                      <span className="text-sm font-semibold text-primary">{category.value}%</span>
+                      <span className="text-sm font-semibold text-primary">₱{category.value.toLocaleString()}</span>
                     </div>
                     <div className="w-full bg-muted rounded-full h-2">
                       <div
                         className="h-2 rounded-full transition-all"
                         style={{
-                          width: `${category.value}%`,
-                          backgroundColor: category.color,
+                          width: `${Math.round((category.value/(revenue||1))*100)}%`,
+                          backgroundColor: category.color || `hsl(var(--primary))`,
                         }}
                       />
                     </div>

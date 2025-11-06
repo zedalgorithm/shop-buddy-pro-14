@@ -1,0 +1,59 @@
+{
+  "name": "VertexPOS - Inventory & Sales Management",
+  "short_name": "VertexPOS",
+  "description": "Complete POS system with inventory management, stock tracking, and real-time analytics",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/images/vertexpos-logo.png",
+      "sizes": "473x157",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/vertexpos-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/vertexpos-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "POS",
+      "short_name": "POS",
+      "description": "Point of Sale",
+      "url": "/pos",
+      "icons": [
+        {
+          "src": "/images/vertexpos-logo.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "View Dashboard",
+      "url": "/dashboard",
+      "icons": [
+        {
+          "src": "/images/vertexpos-logo.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
+
